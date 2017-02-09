@@ -1,0 +1,462 @@
+---
+title: "AllegroMarkdown"
+author: "Daniel Timponi"
+date: "5 de diciembre de 2016"
+output: html_document
+---
+<style type="text/css"> 
+.table {    width: 40%; margin: 0px auto; }
+.caption {    text-align: center; padding-bottom: 40px;}
+.figure {width: 70%; margin: 0px auto;}
+img {text-align: center; display: block;margin-left: auto;margin-right: auto; margin: 0px auto; }
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyr)
+library(splitstackshape)
+library(dplyr, warn.conflicts = FALSE)
+library(pander, warn.conflicts = FALSE)
+library(bibtex)
+library(knitr)
+require("knitcitations")
+library(png)
+library(grid)
+library(stringr)
+library(ggplot2)
+library(arulesViz)
+library(arules)
+
+######################################### Import
+  #import data 
+  data <- read.csv('data/log.csv', sep=";" , header=F, col.names=c('rev', 'author', 'date', 'path'))
+
+###################################### Filter 1
+  #add column of module/directory and filter unwanted modules/directory
+    data <- data %>%
+    mutate(module = gsub('/[^/]+$', '', path)) %>%
+    #filter(grepl('([.]c|[.]h)', path))
+    filter(grepl('^src.*', module)  ) %>%
+      filter(as.Date(date)>as.Date("2011-01-01 00:00:2016-11-05 -0000"))
+
+###################################### Useful tables 1
+    #dsddfsdfasdfsdfasdfasd
+    xx <- data %>%  select(module, date)%>%mutate(year=substr(date, 1,4))
+    xx<-xx %>%      select(module, year)%>%    group_by(year,module) %>%    summarise(n = n() ) %>%    arrange(year)
+     p1 <- xx%>%filter(module=='src/android') %>%select(year,n)%>%group_by(year)
+     p2 <- xx%>%filter(module=='src/linux')%>%select(year,n)%>%group_by(year)
+     p3 <- xx%>%filter(module=='src/unix')%>%select(year,n)%>%group_by(year)
+     p4 <- xx%>%filter(module=='src/win')%>%select(year,n)%>%group_by(year)
+    p5 <- xx%>%filter(module=='src/iphone')%>%select(year,n)%>%group_by(year)
+    p6 <- xx%>%filter(module=='src/mac'|module=='src/macosx')%>%select(year,n)%>%group_by(year)%>%summarise(n=sum(n))
+    p0 <- xx%>%filter(module=='src'|module=='src/misc'|module=='src/opengl'|module=='src/sdl') %>% select(year,n)%>%group_by(year) %>%summarise(n=sum(n))
+   
+    par( mfrow = c( 3, 2 ) )
+    plot(p1,col="darkslateblue", type="b",pch=20, main="Android", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+    plot(p5,col="darkslateblue", type="b",pch=20,main="Iphone", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+    plot(p2,col="darkslateblue", type="b",pch=20, main="Linux", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+    plot(p3,col="darkslateblue", type="b",pch=20, main="Unix", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+    plot(p4,col="darkslateblue", type="b",pch=20,main="Windows", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+    plot(p6,col="darkslateblue", type="b",pch=20,main="Mac OSX", ylab="Number of mantainance task", xlab="year",xlim=c(2011,2015),ylim=c(0,150))
+  
+      
+  #Number of modules modified in a rev
+  modules <- data %>%
+    select(rev, module, author)%>%
+    group_by(rev) %>%
+    summarise(n_module = n_distinct(module), module = paste(unique(module), collapse=", "), author=unique(author)) %>%
+    arrange(rev)
+  modules2 <- modules %>%
+    group_by(n_module) %>%
+    summarise(n_rev= n())%>%
+    mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>%
+    arrange(n_module)
+  #module table with the rev number and modules touched
+  modules3 <- data %>%
+    select(rev, module,author) %>%
+    group_by(rev) %>%
+    arrange(module)%>%
+    summarise( n_module = n_distinct(module), module = paste(unique(module), collapse=", "), author=unique(author)) %>%
+    arrange(n_module,module, rev)
+  
+######################################## filter 2
+  #filter revs that modified a set of packages only once
+  #revs_noise2<-modules3[modules3$module %in% names(table(modules3$module)[table(modules3$module) < 2 ]), ]
+  #data<-data %>% filter( !rev %in% revs_noise2$rev )
+
+  #only updating modules
+  #modules <- modules %>% filter( !rev %in% revs_noise2$rev )
+  #modules3 <- modules3 %>% filter( !rev %in% revs_noise2$rev )
+  
+###################################### Useful tables
+  #number of times a file was modified
+  files <- data %>% group_by(path) %>% summarise( qtd = n() ) %>%  arrange(qtd)
+
+  #Number of files modified in a rev
+  revs <- data %>% group_by(rev) %>% summarise( n_files = n() ) %>%  arrange(rev)
+
+  #upgrading module3 table
+  modules3 <- modules3 %>% arrange (rev)
+  #modules3 [,"n_files"]  <- revs %>% arrange(rev) %>% select (n_files)
+  file_list <- data %>%
+    select(rev, path) %>%
+    group_by(rev) %>%
+    arrange(path)%>%
+    summarise( n_files = n_distinct(path), path = paste(unique(path), collapse=", "))
+  modules3  [,"n_files"] <-  file_list %>% arrange(rev) %>% select (n_files)
+  modules3  [,"path"] <-  file_list %>% arrange(rev) %>% select (path)
+  modules3 <- modules3 %>% arrange(n_module,module, rev)
+  
+  #list all packages in the system
+  modules5 <- data %>% select (module) %>% group_by(module) %>% summarise(n=n())
+
+src <- modules3 %>% filter(str_detect(module, "src,") | module=="src" | str_detect(module, "misc") | str_detect(module, "opengl") | str_detect(module, "sdl") ) 
+gp2xwiz <- modules3 %>% filter(str_detect(module, "gp2xwiz"))
+misc <- modules3 %>% filter(str_detect(module, "misc"))
+opengl <- modules3 %>% filter(str_detect(module, "opengl"))
+raspberrypi <- modules3 %>% filter(str_detect(module, "raspberrypi"))
+sdl <- modules3 %>% filter(str_detect(module, "sdl"))
+x <- modules3 %>% filter(str_detect(module, "/x"))
+android <- modules3 %>% filter(str_detect(module, "android"))
+linux <- modules3 %>% filter(str_detect(module, "linux"))
+unix <- modules3 %>% filter(str_detect(module, "unix"))
+win <- modules3 %>% filter(str_detect(module, "win"))
+iphone <- modules3 %>% filter(str_detect(module, "iphone"))
+macosx <- modules3 %>% filter(str_detect(module, "macosx")) 
+
+src3 <- src %>% select(author) %>% group_by(author)%>% summarise(src=n())
+android3 <- android %>% select(author) %>% group_by(author)%>% summarise(android=n())
+linux3 <- linux %>% select(author) %>% group_by(author)%>% summarise(linux=n())
+unix3 <- unix %>% select(author) %>% group_by(author)%>% summarise(unix=n())
+win3 <- win%>% select(author) %>% group_by(author)%>% summarise(win=n())
+iphone3 <- iphone %>% select(author) %>% group_by(author)%>% summarise(iphone=n())
+macosx3 <- macosx %>% select(author) %>% group_by(author)%>% summarise(macosx=n())
+
+max.len <- max (nrow(src),nrow(gp2xwiz),nrow(misc),nrow(raspberrypi),nrow(sdl),nrow(opengl),nrow(x),nrow(android),nrow(linux),nrow(android),nrow(unix),nrow(win),nrow(iphone),nrow(macosx))
+
+authors<- data.frame( gp2xwiz=c(as.character(gp2xwiz$author), rep(NA, max.len - length(gp2xwiz$author))),
+                      src=c(as.character(src$author), rep(NA, max.len - length(src$author))),
+                     misc=c(as.character(misc$author), rep(NA, max.len - length(misc$author))), 
+                     opengl=c(as.character(opengl$author), rep(NA, max.len - length(opengl$author))), 
+                     raspberrypi=c(as.character(raspberrypi$author), rep(NA, max.len - length(raspberrypi$author))), 
+                     sdl=c(as.character(sdl$author), rep(NA, max.len - length(sdl$author))), 
+                     x=c(as.character(x$author), rep(NA, max.len - length(x$author))), 
+                     android=c(as.character(android$author), rep(NA, max.len - length(android$author))),
+                     linux=c(as.character(linux$author), rep(NA, max.len - length(linux$author))),
+                     unix=c(as.character(unix$author), rep(NA, max.len - length(unix$author))), 
+                     win=c(as.character(win$author), rep(NA, max.len - length(win$author))), 
+                     iphone=c(as.character(iphone$author), rep(NA, max.len - length(iphone$author))), 
+                     macosx=c(as.character(macosx$author), rep(NA, max.len - length(macosx$author))) )
+
+
+authors3 <- data %>% select(author) %>% distinct(author) %>% mutate(id=as.numeric(author))
+authors3 <-merge(authors3,src3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,android3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,linux3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,unix3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,win3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,iphone3,by="author", all.x = TRUE)
+authors3 <-merge(authors3,macosx3,by="author", all.x = TRUE)
+
+authors3 <- authors3 %>% rowwise() %>%  mutate(n_platform=6-(is.na(android)+is.na(linux)+is.na(win)+is.na(unix)+is.na(iphone)+is.na(macosx)), n_commit= sum(src,android,linux,win,unix,iphone,macosx,NA, na.rm = TRUE)  )
+
+
+
+## Filtrar autores que nao trabalharam com plataformas e src
+authors3 <- authors3 %>% filter( !(is.na(src) & n_platform == 0))
+
+authors2<- data.frame( gp2xwiz=c(gp2xwiz$author, rep(NA, max.len - length(gp2xwiz$author))),
+                      src=c(src$author, rep(NA, max.len - length(src$author))),
+                     misc=c(misc$author, rep(NA, max.len - length(misc$author))), 
+                     opengl=c(opengl$author, rep(NA, max.len - length(opengl$author))), 
+                     raspberrypi=c(raspberrypi$author, rep(NA, max.len - length(raspberrypi$author))), 
+                     sdl=c(sdl$author, rep(NA, max.len - length(sdl$author))), 
+                     x=c(x$author, rep(NA, max.len - length(x$author))), 
+                     android=c(android$author, rep(NA, max.len - length(android$author))),
+                     linux=c(linux$author, rep(NA, max.len - length(linux$author))),
+                     unix=c(unix$author, rep(NA, max.len - length(unix$author))), 
+                     win=c(win$author, rep(NA, max.len - length(win$author))), 
+                     iphone=c(iphone$author, rep(NA, max.len - length(iphone$author))), 
+                     macosx=c(macosx$author, rep(NA, max.len - length(macosx$author))) )
+                   
+
+#table - number of packages touched in a commit
+android2 <- modules %>% filter(str_detect(module, "android"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+linux2 <- modules %>% filter(str_detect(module, "linux"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+unix2 <- modules %>% filter(str_detect(module, "unix"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+win2 <- modules %>% filter(str_detect(module, "win"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+iphone2 <- modules %>% filter(str_detect(module, "iphone"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+macosx2 <- modules %>% filter(str_detect(module, "macosx"))%>%group_by(n_module) %>% summarise(n_rev= n())%>%  mutate (porcentage = round(n_rev/sum(n_rev) * 100, 1) ) %>% arrange(n_module)
+
+#summmary of commits by os
+os_summary <- data.frame(n_commit = c(nrow(android),nrow(linux),nrow(unix),nrow(win),nrow(iphone),nrow(macosx)), row.names= c('android', 'linux', 'unix', 'win', 'iphone', 'macosx'))
+os_summary2 <- as.data.frame( t(os_summary))     
+
+#graph - relation between number of packages and files touched in a commit   
+graf1 <- modules3 %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+android_graf1 <- android %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+linux_graf1 <- linux %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+unix_graf1 <- unix %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+win_graf1 <- win %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+iphone_graf1 <- iphone %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+macosx_graf1 <- macosx %>% select (n_module,n_files) %>% group_by(n_module) %>% summarise(n_files= sum(n_files)/n())
+
+
+
+#porcentagem do numero de plataforma os desenvolvedores trabalham
+
+z<-authors3%>% select(n_platform) %>% filter (n_platform>0)%>% group_by(n_platform) %>% summarise(n=n())%>%mutate(porcentage = round(n/sum(n) * 100, 1)) 
+
+
+#core developers
+
+devcore <- authors3%>% filter(n_commit>100) %>% group_by(n_platform) %>% summarise(n=n())%>%mutate(porcentage = round(n/sum(n) * 100, 1))
+devperi <- authors3%>% filter(n_commit<100 )%>% group_by(n_platform) %>% summarise(n=n())%>%mutate(porcentage = round(n/sum(n) * 100, 1))
+
+
+
+
+
+authors4 <- authors3 %>% select(android,linux,unix,win, iphone,macosx) 
+authors41 <- authors3 %>% select(android,linux,unix,win, iphone,macosx, n_commit ) 
+authors4[colnames(authors4)][is.na(authors4[colnames(authors4)])] <- 0
+authors41[colnames(authors41)][is.na(authors41[colnames(authors41)])] <- 0
+
+authors5 <- ifelse(authors4>0, 1, 0)
+authors41 <- authors3 %>% select(android,linux,unix,win, iphone,macosx, n_commit ) 
+authors42 <- authors3 %>% filter (! author %in% c("elias@users.sourceforge.net","siegelord@users.sourceforge.net","trentg@users.sourceforge.net","tjaden@users.sourceforge.net")) %>% select(android,linux,unix,win, iphone,macosx, n_commit ) 
+authors43 <- authors3 %>% filter ( author %in% c("elias@users.sourceforge.net","siegelord@users.sourceforge.net","trentg@users.sourceforge.net","tjaden@users.sourceforge.net")) %>% select(android,linux,unix,win, iphone,macosx, n_commit ) 
+authors41[colnames(authors41)][is.na(authors41[colnames(authors41)])] <- 0
+authors42[colnames(authors42)][is.na(authors42[colnames(authors42)])] <- 0
+authors43[colnames(authors43)][is.na(authors43[colnames(authors43)])] <- 0
+authors6<- authors41 %>% mutate(Desktop=linux+unix+win+macosx, Mobile=android+iphone)%>% select (Desktop,Mobile)
+authors62<- authors42 %>% mutate(Desktop=linux+unix+win+macosx, Mobile=android+iphone)%>% select (Desktop,Mobile)
+authors63<- authors43 %>% mutate(Desktop=linux+unix+win+macosx, Mobile=android+iphone)%>% select (Desktop,Mobile)
+
+
+
+#geral
+devicetype <- data.frame(developer=c(
+  filter(authors6, Desktop==0 &Mobile==0) %>% nrow(),
+  filter(authors6, Desktop>0 &Mobile==0) %>% nrow(),
+  filter(authors6, Desktop==0 &Mobile>0) %>% nrow(),
+  filter(authors6, Desktop>0 &Mobile>0) %>% nrow() ),row.names = c("None", "Desktop", "Mobile", "Both") )
+devicetype <- devicetype %>% mutate(porcentage= (developer/sum(developer))*100)
+#peri
+devicetype2 <- data.frame(developer=c(
+  filter(authors62, Desktop==0 &Mobile==0) %>% nrow(),
+  filter(authors62, Desktop>0 &Mobile==0) %>% nrow(),
+  filter(authors62, Desktop==0 &Mobile>0) %>% nrow(),
+  filter(authors62, Desktop>0 &Mobile>0) %>% nrow() ),row.names = c("None", "Desktop", "Mobile", "Both") )
+devicetype2 <- devicetype2 %>% mutate(porcentage= (developer/sum(developer))*100)
+#core
+devicetype3 <- data.frame(developer=c(
+  filter(authors63, Desktop==0 &Mobile==0) %>% nrow(),
+  filter(authors63, Desktop>0 &Mobile==0) %>% nrow(),
+  filter(authors63, Desktop==0 &Mobile>0) %>% nrow(),
+  filter(authors63, Desktop>0 &Mobile>0) %>% nrow() ),row.names = c("None", "Desktop", "Mobile", "Both") )
+devicetype3 <- devicetype3 %>% mutate(porcentage= (developer/sum(developer))*100)
+
+
+authors6 <- ifelse(authors6>0, 1, 0)
+authors62 <- ifelse(authors62>0, 1, 0)
+authors63 <- ifelse(authors63>0, 1, 0)
+c("elias@users.sourceforge.net","siegelord@users.sourceforge.net","trentg@users.sourceforge.net","tjaden@users.sourceforge.net")
+
+```
+
+## Allegro Geral
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(modules2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(graf1$n_module, graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+  
+```
+
+Número de commits por SO.
+```{r}
+#Number of commits by OS
+pie(os_summary$n_commit, labels = row.names(os_summary) , main="Number of commits by OS")
+  
+```
+
+Número de pacotes modificados por so
+```{r}
+#number of modified packages
+boxplot(android$n_module, unix$n_module, linux$n_module, win$n_module, iphone$n_module, macosx$n_module,	names=c('Android','Unix','Linux','Windows','Iphone','Mac OSX'), main="", ylab="Number of packages",cex=1.3,cex.axis=1.3,cex.lab=1.3)
+
+```
+
+Número de arquivos modificados por so
+```{r}
+#number of modified files
+boxplot(android$n_files, unix$n_files, linux$n_files, win$n_files, iphone$n_files, macosx$n_files, log="y", yaxt="n",names=c('android','unix','linux','win','iphone','macosx'))
+  ylim <- par("usr")[3:4] 
+  log10AtY <- seq(ceiling(ylim[1]), floor(ylim[2])) 
+  axis(side=2, at=10^log10AtY, lab=as.expression(lapply(log10AtY, function(y)bquote(10^.(y)))))   
+```
+
+
+Quantidade de plataformas de cada desenvolvedor
+```{r}
+hist(authors3$n_platform, xlab = "Number of platform", ylab = "Number of developers", main="",cex=1.3,cex.axis=1.3,cex.lab=1.3)
+
+
+
+```
+
+Correlaçao entre número de commits e número de plataforma (por desenvolvedor)
+```{r}
+cor(authors3$n_commit, authors3$n_platform)
+```
+
+
+???? Correlação entre número de commits por plataforma
+```{r}
+
+
+cor(authors4[, colnames(authors4)])
+
+```
+
+Core are responsible for X% of total commits
+```{r}
+((186+199+319+409)*100)/1143
+
+```
+
+
+Regra de associação entre  desenvolvedor e plataforma 
+```{r}
+
+rules_dev  <- apriori(authors5,parameter=list(support=0.3,confidence=0.8))
+inspect(rules_dev)
+```
+
+Regra de associação entre  desenvolvedor mobile desktop
+```{r}
+
+rules_dev  <- apriori(authors6)
+inspect(rules_dev)
+
+cor(authors6)
+```
+
+Regra de associação entre commit e plataforma
+
+Support
+Support is an indication of how frequently the itemset appears in the database.
+
+Confidence
+Confidence is an indication of how often the rule has been found to be true.
+```{r}
+commits <- as.data.frame.matrix(xtabs(~ rev + module, data=data[c('module', 'rev')]))
+
+colnames(commits) <- c(gsub('src/','',colnames(commits)))
+
+commits <- commits %>% select(android, linux,unix,win,iphone,macosx)
+
+commits<-subset(commits, !(android==0 & linux==0 & unix==0 & win==0 & iphone==0 & macosx==0))
+
+rownames(commits)<-NULL
+commits<- ifelse(commits>0, 1, 0)
+
+rules_commit <- apriori(commits)
+rules_commit <- apriori(commits,parameter=list(support=0.001,confidence=0.8))
+inspect(rules_commit)
+
+```
+
+## Android
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(android2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(android_graf1$n_module, android_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+
+
+## Linux
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(linux2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(linux_graf1$n_module, linux_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+
+## Unix
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(unix2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(unix_graf1$n_module, unix_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+
+## Win
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(win2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(win_graf1$n_module, win_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+
+## iphone
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(iphone2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(iphone_graf1$n_module, iphone_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+
+## macosx
+
+Quantidade de commits de acordo com o número de pacotes tocados.
+```{r}
+kable(macosx2,col.names = c("Pacote", "Commit", "%"),  align = c('r', 'r', 'r'))
+```
+
+Número médio de arquivos modificados em um commit de acordo com o número de pacotes.
+```{r}
+plot(macosx_graf1$n_module, macosx_graf1$n_files, col="darkslateblue", type="b",pch=20, main="Relation between number of packages and files touched in a commit", xlab="Number of modules", ylab="Number of files")
+```
+
+
+

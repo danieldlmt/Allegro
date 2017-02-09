@@ -1,0 +1,1 @@
+git log --follow --name-only --pretty="%h %ce %ci" -- C:\Users\Daniel\workspace\allegro5 --since="2008-10-01" --before="2016-11-01" 
